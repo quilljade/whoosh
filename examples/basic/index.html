@@ -1,0 +1,18 @@
+<html>
+	<head>
+		<title> whoosh example: basic </title>
+		<script src="http://code.jquery.com/jquery-2.1.1.min.js"></script>
+		<script src="../../src/whoosh.js"></script>
+	</head>
+	<body>
+		<div id="whooshDiv" style="margin: 50px auto; width: 800px; height: 600px; background: #f0f0f0; border: 1px solid black;"></div>
+		<script>
+			$('#whooshDiv').whoosh({
+				"base_name": "zoom{frame_number}.jpg",
+				"digits": 2,
+				"first_frame": 0,
+				"last_frame": 48
+			});
+		</script>
+	</body>
+</html>
