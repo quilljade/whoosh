@@ -1,4 +1,4 @@
-# Proejct Branches
+# Project Branches
 
 ## Releases
 
