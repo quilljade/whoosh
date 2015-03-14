@@ -1,5 +1,5 @@
 // whoosh.js
-// Copyright (c) 2014 Damien Jones
+// Copyright (c) 20142-15 Damien Jones
 // Based on whoosh.swf, Copyright (c) 2008 Damien Jones
 
 ;(function($, window, undefined){
@@ -13,17 +13,18 @@
 		"digits": 2,							// how many digits make up the numbers
 		"interval": 50,							// time in milliseconds between frames (20fps)
 		"speed": 0.5,							// how fast the animation should zoom
-		"rotate": 0.025,						// how fast the animation should spin
+		"rotate": 0.025,						// how fast the animation should spin, in whole turns per second
 		"cushion": 4.0							// acceleration for starting/stopping
 	};
 
 	// player class; one of these is created and attached
 	// to the containing DIV at player creation time
 	function Whoosh(container, all_opts){
-		console.log(container);
-		console.log(all_opts);
+		console.log("creating player for", container);
+		console.log("resolved options:", all_opts);
 		this.container = container;
 		this.canvas = container.find('canvas');
+		this.context = this.canvas[0].getContext('2d');
 		this.opts = all_opts;
 		this.images = null;						// no images set up yet
 
@@ -52,13 +53,12 @@
 			// to record when it's loaded
 			var frame_number = ('0000'+i.toString()).substr(-this.opts.digits);
 			var frame_name = this.opts.base_name.replace('{frame_number}', frame_number);
-			console.log(frame_name);
 			var image = new Image();
-			image.src = frame_name;
 			image.onload = function(){
 				that.loaded_image(this);
 			};
-			this.images.push([ image, false ]);	// image isn't loaded YET
+			image.src = frame_name;
+			this.images.push([ image, false, null ]);	// image isn't loaded YET and doesn't have a memory context
 		}
 	};
 
@@ -67,8 +67,10 @@
 		for (i = 0; i < this.images.length; i++)
 			if (this.images[i][0] == image)
 			{
-				console.log(i, this.images[i]);
+				console.log("loaded:", i, this.images[i], this.images[i][0].width, 'x', this.images[i][0].height);
 				this.images[i][1] = true;
+				if (i == 0)
+					this.render(0);
 				break;
 			}
 	};
@@ -76,6 +78,7 @@
 	Whoosh.prototype.start = function(){
 		if (this.interval_handle == null)
 		{
+			console.log('starting player');
 			var that = this;
 			this.interval_handle = window.setInterval(function(){
 				that.interval();
@@ -86,6 +89,7 @@
 	Whoosh.prototype.stop = function(){
 		if (this.interval_handle != null)
 		{
+			console.log('stopping player');
 			window.clearInterval(this.interval_handle);
 			this.interval_handle = null;
 		}
@@ -134,33 +138,68 @@
 		this.frame_position += position_speed * 0.05;	// 1/20 is a kluge for now
 		this.frame_rotation += rotation_speed * 18;
 
+		// draw the whole frame
+		this.render();
+	}
+
+	Whoosh.prototype.render = function(frame_position){
+		// the meat: how to render a single frame of the animation,
+		// given a fractional frame position and rotation; this is
+		// separate from the interval because there are two use
+		// cases where we need to render arbitrary frames: (1) as
+		// the first frame in the animation (immediately after the
+		// first frame loads, even if the animation isn't started)
+		// and (2) as the user drags a position slider
+
 		// now figure out how to draw all these images
-		var frame_top = Math.floor(this.frame_position);
+		var frame_top = (frame_position == undefined) ? Math.floor(this.frame_position) : frame_position;
 		var frame_partial = this.frame_position - frame_top;
 		var frame_count = 3;	// number of frames to render
 		var base_scale = Math.pow(2.0, frame_partial);
 
+		// flush any image memory contexts we're not going
+		// to use
+		for (i = 0; i < this.images.length; i++)
+			if ((i < frame_top || i >= frame_top+frame_count) && this.images[i][2] != null)
+				this.images[i][2] = null;
+
 		// draw the frames
-		var context = this.canvas[0].getContext('2d');
 		var cx = this.canvas.width() * 0.5;				// canvas center point
 		var cy = this.canvas.height() * 0.5;
 
-		console.log(this.frame_position, frame_top, cx, cy, base_scale);
+//		console.log(this.frame_position, frame_top, cx, cy, base_scale);
 
 		for (i = frame_top; i < frame_top+frame_count; i++)
 		{
-			if (i >= this.images.length)
+			if (i >= this.images.length)				// past the end of our animation frames (stop)
 				break;
+			if (!this.images[i][1])						// image isn't currently loaded (skip)
+			{
+				base_scale *= 0.5;
+				continue;
+			}
 
 			var image = this.images[i][0];
 			var iw = image.width * base_scale;			// image dimensions, scaled appropriately
 			var ih = image.height * base_scale;
-			console.log('   ', i, iw, ih);
-			context.drawImage(image, cx - iw*0.5, cy - ih*0.5, iw, ih);
+
+			// we want a memory context for this image; if we
+			// haven't created one yet
+			if (this.images[i][2] == null)
+			{
+				var temp_canvas = document.createElement('canvas');
+				temp_canvas.width = image.width;
+				temp_canvas.height = image.height;
+				var temp_context = temp_canvas.getContext('2d');
+				temp_context.drawImage(image, 0, 0);
+				this.images[i][2] = temp_canvas;
+			}
+
+//			console.log('   ', i, iw, ih);
+			this.context.drawImage(this.images[i][2], cx - iw*0.5, cy - ih*0.5, iw, ih);
 			base_scale *= 0.5;
 		}
 	};
-
 
 	// add to jQuery this function...
 	$.fn.extend({
@@ -181,6 +220,17 @@
 				// create the player data object
 				var player = new Whoosh(container, all_opts);
 				$(this).data('whoosh', player);
+
+				// placeholder event handler to stop/start animation
+				container.on('click.whoosh', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+
+					if (player.interval_handle != null)
+						player.stop();
+					else
+						player.start();
+				});
 			});
 		}
 	});
