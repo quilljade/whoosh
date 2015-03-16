@@ -1,5 +1,5 @@
 // whoosh.js
-// Copyright (c) 20142-15 Damien Jones
+// Copyright (c) 2014-15 Damien Jones
 // Based on whoosh.swf, Copyright (c) 2008 Damien Jones
 
 ;(function($, window, undefined){
@@ -12,9 +12,9 @@
 		"last_frame": 10,						// last frame number (easier than counting)
 		"digits": 2,							// how many digits make up the numbers
 		"interval": 50,							// time in milliseconds between frames (20fps)
-		"speed": 0.5,							// how fast the animation should zoom
+		"speed": 0.5,							// how fast the animation should zoom, in keyframes per second
 		"rotate": 0.025,						// how fast the animation should spin, in whole turns per second
-		"cushion": 4.0							// acceleration for starting/stopping
+		"cushion": 0.25							// how much to change speed, per second (zero disables cushion)
 	};
 
 	// player class; one of these is created and attached
@@ -28,16 +28,47 @@
 		this.opts = all_opts;
 		this.images = null;						// no images set up yet
 
-		// playback requires some state data
+		// playback state data
+		this.is_zooming_out = false;			// essentially, a forwards-or-backwards flag
+		this.is_paused = false;					// update timer still running, but not animating
+		this.interval_handle = null;
+
+		// zooming requires some state data; this
+		// is computed per-frame but saved
+		this.frame_time = null;
 		this.frame_position = 0.0;				// a float, not an integer
 		this.frame_position_speed = 0.0;
-		this.is_zooming_out = false;
-
 		this.frame_rotation = 0.0;				// a float, not an integer
 		this.frame_rotation_speed = 0.0;
 
-		this.is_paused = false;
-		this.interval_handle = null;
+		// At each step we need to compute a new position; to
+		// do that correctly we must know the time offset from
+		// a reference point, and what position and speed that
+		// reference point were at. Then we apply some math(s).
+		// The reference point will be reset each time the
+		// playback is started.
+		this.reference_time = null;
+		this.reference_position = 0.0;
+		this.reference_position_speed = 0.0;
+		this.reference_rotation = 0.0;
+		this.reference_rotation_speed = 0.0;
+
+		// we also compute and save the end position of the
+		// movie as we might change this if we reverse the
+		// movie while it's playing
+		this.computed_position_end = 0.0;
+
+		// when we set the reference position we will compute
+		// the divisions between the segments, based on the
+		// current cushion and the length of the movie
+		this.time_position_acceleration_ends = 0.0;			// time offsets
+		this.time_position_deceleration_begins = 0.0;
+		this.time_position_deceleration_ends = 0.0;
+		this.time_rotation_acceleration_ends = 0.0;
+
+		this.computed_position_acceleration_ends = 0.0;		// actual computed values
+		this.computed_position_deceleration_begins = 0.0;
+		this.computed_rotation_acceleration_ends = 0.0;
 
 		// prep the images
 		this.load_images();
@@ -60,6 +91,10 @@
 			image.src = frame_name;
 			this.images.push([ image, false, null ]);	// image isn't loaded YET and doesn't have a memory context
 		}
+
+		// go ahead and set the end position of the movie
+		// (stub; later refactor may move this)
+		this.computed_position_end = this.images.length;	// last frame at 100% scale
 	};
 
 	Whoosh.prototype.loaded_image = function(image){
@@ -70,15 +105,17 @@
 				console.log("loaded:", i, this.images[i], this.images[i][0].width, 'x', this.images[i][0].height);
 				this.images[i][1] = true;
 				if (i == 0)
-					this.render(0);
+					this.render(0);				// first frame is loaded, render it
 				break;
 			}
 	};
 
+	// start (or unpause) a movie
 	Whoosh.prototype.start = function(){
 		if (this.interval_handle == null)
 		{
 			console.log('starting player');
+			this.set_reference_point();
 			var that = this;
 			this.interval_handle = window.setInterval(function(){
 				that.interval();
@@ -86,6 +123,9 @@
 		}
 	};
 
+	// stop (or rather, pause) a movie
+	// NOTE: if your intent is to stop and reset to the
+	// beginning, you'll need to call reset() as well
 	Whoosh.prototype.stop = function(){
 		if (this.interval_handle != null)
 		{
@@ -95,64 +135,143 @@
 		}
 	};
 
-	Whoosh.prototype.interval = function(){
-		// the meat; what to do at each refresh interval
+	// a simplified pause handler that stops/starts
+	// based on the current state
+	Whoosh.prototype.pause = function(){
+		if (this.interval_handle != null)
+			this.stop();
+		else
+			this.start();
+	};
 
+	// what to do at each refresh interval
+	Whoosh.prototype.interval = function(){
 		// paused movies do absolutely nothing
-		// (they should actually turn off the interval)
+		// (they should actually turn off the interval, but
+		// if it's still running at least they won't move)
 		if (this.is_paused)
 			return;
 
-		// update our zoom speed
-		var position_speed = this.frame_position_speed;
-
-		if (this.opts.cushion == 0)
-		{
-			// we're not cushioning speed changes; set them
-			// to the final values right now
-			position_speed = this.opts.speed;
-		}
-		else
-		{
-			// stub!
-			position_speed = this.opts.speed;
-		}
-
-		// update our rotation speed
-		var rotation_speed = this.frame_rotation_speed;
-
-		if (this.opts.cushion == 0)
-		{
-			// we're not cushioning speed changes; set them
-			// to the final values right now
-			rotation_speed = this.opts.rotate;
-		}
-		else
-		{
-			// stub!
-			rotation_speed = this.opts.rotate;
-		}
-
-		// with zoom and rotation speeds updated, update the
-		// values
-		this.frame_position += position_speed * 0.05;	// 1/20 is a kluge for now
-		this.frame_rotation += rotation_speed * 18;
+		// update position, rotation, and speeds
+		this.frame_time = new Date();
+		this.compute_position();
 
 		// draw the whole frame
 		this.render();
 	}
 
-	Whoosh.prototype.render = function(frame_position){
-		// the meat: how to render a single frame of the animation,
-		// given a fractional frame position and rotation; this is
-		// separate from the interval because there are two use
-		// cases where we need to render arbitrary frames: (1) as
-		// the first frame in the animation (immediately after the
-		// first frame loads, even if the animation isn't started)
-		// and (2) as the user drags a position slider
+	// set up reference point and compute segment boundaries
+	// for later position computation (reference point is a
+	// copy of current position and speed)
+	Whoosh.prototype.set_reference_point = function(){
+		// anchored at this time
+		this.reference_time = new Date();
 
-		// now figure out how to draw all these images
-		var frame_top = (frame_position == undefined) ? Math.floor(this.frame_position) : frame_position;
+		// clone of current position
+		this.reference_position       = this.frame_position;
+		this.reference_position_speed = this.frame_position_speed;
+		this.reference_rotation       = this.frame_rotation;
+		this.reference_rotation_speed = this.frame_rotation_speed;
+
+		// There are three segments to the speed curve:
+		//
+		//  1. speed changes linearly from the reference
+		//     point speed to the target speed (this.opts.speed)
+		//  2. speed remains constant
+		//  3. speed decreases linearly to zero at the end
+		//     of the animation (such that position reaches
+		//     the end point precisely when speed reaches
+		//     zero)
+		//
+		// Position is thus a quadratic curve in segments
+		// 1 and 2 and linear in segment 2.
+
+		// compute the time offsets for the segment boundaries
+
+		// end of first segment
+		var t = (this.opts.speed - this.reference_position_speed) / this.opts.cushion;
+		this.time_position_acceleration_ends = t;
+		this.computed_position_acceleration_ends = this.reference_position + this.reference_position_speed*t + 0.5*this.opts.cushion*t*t;
+
+		// beginning of third segment, relative to the end; we
+		// can't compute the actual time until we know how far
+		// the deceleration process will play over, and subtract
+		// the acceleration and deceleration distances from the
+		// total distance
+		t = this.opts.speed / this.opts.cushion;
+		this.time_position_deceleration_begins = -t;
+		this.computed_position_deceleration_begins = this.computed_position_end - 0.5*this.opts.cushion*t*t;
+
+		// now that we know where acceleration ends and
+		// deceleration begins, we can compute the actual length
+		// of time for the constant-speed section in the middle
+		//
+		// edge case: deceleration has to begin before acceleration
+		// ends, because there's not enough room to reach full
+		// speed; in this case, there's no constant-speed section
+		//**** TODO
+		t = (this.computed_position_deceleration_begins - this.computed_position_acceleration_ends) / this.opts.speed;
+		this.time_position_deceleration_ends = this.time_position_acceleration_ends + t - this.time_position_deceleration_begins;
+		this.time_position_deceleration_begins += this.time_position_deceleration_ends;
+
+		// now, follow a similar process for rotation, except that
+		// we don't decelerate
+		//**** TODO
+
+		console.log('reference point set', this);
+	};
+
+	// given a particular time offset, compute the current
+	// position, rotation, and speeds
+	Whoosh.prototype.compute_position = function(){
+		var t = (this.frame_time - this.reference_time) * 0.001;	// elapsed time, in seconds
+
+		if (t < this.time_position_acceleration_ends)
+		{
+			// segment 1: speed increases towards target speed
+			this.frame_position = this.reference_position + this.reference_position_speed*t + 0.5*this.opts.cushion*t*t;
+			this.frame_position_speed = this.reference_position_speed + this.opts.cushion*t;
+		}
+		else if (t < this.time_position_deceleration_begins)
+		{
+			// segment 2: speed is constant
+			t -= this.time_position_acceleration_ends;
+			this.frame_position = this.computed_position_acceleration_ends + this.opts.speed*t;
+			this.frame_position_speed = this.opts.speed;
+		}
+		else
+		{
+			// segment 3: speed decreases towards zero
+			t -= this.time_position_deceleration_ends;
+			this.frame_position = this.computed_position_end - 0.5*this.opts.cushion*t*t;
+			this.frame_position_speed = -this.opts.cushion*t;
+		}
+	};
+
+	// the meat: how to render a single frame of the animation,
+	// given a fractional frame position and rotation; this is
+	// separate from the interval because there are two use
+	// cases where we need to render arbitrary frames: (1) as
+	// the first frame in the animation (immediately after the
+	// first frame loads, even if the animation isn't started)
+	// and (2) as the user drags a position slider
+	Whoosh.prototype.render = function(frame_position){
+
+		// We need to determine the base scale for the first
+		// image. Subsequent images will always be half the
+		// previous image size. Generally we want to render
+		// one frame in the 50% to 100% range, one frame in
+		// the 100% to 200% range, and as many additional
+		// frames as required to fill the canvas. But we have
+		// to draw the largest-scaled version first, so the
+		// more detailed versions will overlay on top.
+		//
+		// We think of the frame_position as a floating-point
+		// value representing which keyframe is the 100% to
+		// 200% image. We do this because
+
+		// figure out where to draw all these images
+		var frame_top = Math.floor((frame_position == undefined) ? this.frame_position : frame_position);
 		var frame_partial = this.frame_position - frame_top;
 		var frame_count = 3;	// number of frames to render
 		var base_scale = Math.pow(2.0, frame_partial);
@@ -225,11 +344,7 @@
 				container.on('click.whoosh', function(e) {
 					e.preventDefault();
 					e.stopPropagation();
-
-					if (player.interval_handle != null)
-						player.stop();
-					else
-						player.start();
+					player.pause();
 				});
 			});
 		}
