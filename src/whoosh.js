@@ -337,7 +337,7 @@
 		ry /= base_scale;
 
 		var extra_frames = 0;
-		for (extra_frames = 0; extra_frames < 2 && frame_top-extra_frames >= 0; extra_frames++)
+		for (extra_frames = 0; extra_frames < 2; extra_frames++)
 		{
 			// scale up the initial image (this is why we pre-scale
 			// down above, since we always do at least one iteration)
@@ -348,6 +348,12 @@
 //			console.log('extra frame', extra_frames);
 //			console.log('  testing base scale', base_scale);
 //			console.log('  rotation vector', rx, ry);
+
+			// before we check the corner points, it's possible
+			// this is the last available frame; if so, don't
+			// bother testing another one, this is it
+			if (frame_top-extra_frames == 0)
+				break;
 
 			// compute corners for each frame because the
 			// keyframe images can be different sizes
@@ -378,6 +384,11 @@
 		for (i = 0; i < this.images.length; i++)
 			if ((i < frame_top || i >= frame_top+frame_count) && this.images[i][2] != null)
 				this.images[i][2] = null;
+
+		// set the overall rotation
+		this.context.save();
+		this.context.translate(cx,cy);
+		this.context.rotate(-this.frame_rotation * 2 * Math.PI);
 
 		// draw the frames
 
@@ -410,9 +421,13 @@
 			}
 
 //			console.log('   ', i, iw, ih);
-			this.context.drawImage(this.images[i][2], cx - iw*0.5, cy - ih*0.5, iw, ih);
+			this.context.drawImage(this.images[i][2], -iw*0.5, -ih*0.5, iw, ih);	// center is set by translate
 			base_scale *= 0.5;
 		}
+
+		// make sure to restore the context so as to
+		// undo the rotation/translation
+		this.context.restore();
 	};
 
 	// add to jQuery this function...
