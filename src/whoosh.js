@@ -268,13 +268,110 @@
 		//
 		// We think of the frame_position as a floating-point
 		// value representing which keyframe is the 100% to
-		// 200% image. We do this because
+		// 200% image. We do this because it's the most
+		// straightforward way to represent position within
+		// the whole animation. Note that this is not a TIME
+		// but instead a position; since the playback speed
+		// and acceleration factor are independent of the
+		// keyframe data, we actually treat time as a value
+		// from which we can determine position, rather than
+		// the exact position.
+		//
+		// One complication is that there's no direct
+		// relationship between the canvas dimensions and
+		// the bitmap dimensions, nor is there any guarantee
+		// that every keyframe image is the same size. To
+		// make matters worse, we allow for images to be
+		// arbitrarily rotated, so as we scan backwards to
+		// find the largest image we need to render, we want
+		// to determine whether the image actually overlaps
+		// the whole canvas. The easiest method is to check
+		// if the top corners of the canvas, rotated to their
+		// positions within the copied image, are inside.
+		//
+		// It's possible in this search, especially at the
+		// beginning, that we might not have any enlarged
+		// images available. It would certainly be possible
+		// to clamp the available frame positions to those
+		// which can include full coverage, but as a design
+		// choice we do not, because:
+		//
+		//  1. The number of larger keyframes we need will
+		//     depend on the rotation angle of the frame.
+		//
+		//  2. The number of larger keyframes we need will
+		//     depend on the canvas size (thus it may change
+		//     if the canvas is a percentage of the page
+		//     size, or the user switches to full-size mode).
+		//
+		// Either of these mean that the minimum frame position
+		// value is not constant, and changing it will result
+		// in some unpredictable and unpleasant jumps in the
+		// current frame position. We instead impose this
+		// consideration on the animation creator, recommending
+		// that the first frame be rendered sufficiently large
+		// to encompass whatever variations they permit during
+		// playback.
 
-		// figure out where to draw all these images
+		// determine base frame position
 		var frame_top = Math.floor((frame_position == undefined) ? this.frame_position : frame_position);
 		var frame_partial = this.frame_position - frame_top;
-		var frame_count = 3;	// number of frames to render
+		var frame_count = 2;	// number of frames to render (1 @ 100%-200%, 1 @ 50%-100%)
 		var base_scale = Math.pow(2.0, frame_partial);
+
+		// determine how many extra frames we must render
+		// so that the canvas corners are covered by bitmaps
+		var cx = this.canvas.width() * 0.5;				// canvas center point
+		var cy = this.canvas.height() * 0.5;
+
+		var rx = Math.cos(this.frame_rotation * 2 * Math.PI);	// rotation vector
+		var ry = Math.sin(this.frame_rotation * 2 * Math.PI);
+
+		// search for extra frames; we start with the current
+		// full-size frame in case it satisfies the full-coverage
+		// requirement, and we cap at 2 extra frames (meaning we
+		// would be magnifying it 4x on each axis, which is ugly;
+		// use larger keyframe images)
+		base_scale *= 0.5;
+		rx /= base_scale;
+		ry /= base_scale;
+
+		var extra_frames = 0;
+		for (extra_frames = 0; extra_frames < 2 && frame_top-extra_frames >= 0; extra_frames++)
+		{
+			// scale up the initial image (this is why we pre-scale
+			// down above, since we always do at least one iteration)
+			base_scale *= 2.0;
+			rx *= 0.5;
+			ry *= 0.5;
+
+//			console.log('extra frame', extra_frames);
+//			console.log('  testing base scale', base_scale);
+//			console.log('  rotation vector', rx, ry);
+
+			// compute corners for each frame because the
+			// keyframe images can be different sizes
+			var image = this.images[frame_top-extra_frames][0];
+			var ulx = image.width * 0.5 + (-cx*rx - cy*ry);		// upper left corner
+			var uly = image.height * 0.5 + (-cx*ry + cy*rx);
+			var urx = image.width * 0.5 + (cx*rx - cy*ry);		// upper right corner
+			var ury = image.height * 0.5 + (cx*ry + cy*rx);
+
+//			console.log('  image dimensions', image.width, 'x', image.height);
+//			console.log('  upper left canvas', ulx, uly);
+//			console.log('  upper right canvas', urx, ury);
+
+			if (ulx >= 0 && ulx < image.width && uly >= 0 && uly < image.height &&
+				urx >= 0 && urx < image.width && ury >= 0 && ury < image.height)
+			{
+				// both corners are within bounds of the image,
+				// so this is enough
+				break;
+			}
+		}
+
+		frame_top -= extra_frames;
+		frame_count += extra_frames;
 
 		// flush any image memory contexts we're not going
 		// to use
@@ -283,8 +380,6 @@
 				this.images[i][2] = null;
 
 		// draw the frames
-		var cx = this.canvas.width() * 0.5;				// canvas center point
-		var cy = this.canvas.height() * 0.5;
 
 //		console.log(this.frame_position, frame_top, cx, cy, base_scale);
 
