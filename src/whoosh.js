@@ -30,7 +30,7 @@
 
 		// playback state data
 		this.is_zooming_out = false;			// essentially, a forwards-or-backwards flag
-		this.is_paused = false;					// update timer still running, but not animating
+		this.is_paused = true;					// update timer still running, but not animating
 		this.interval_handle = null;
 
 		// zooming requires some state data; this
@@ -69,6 +69,9 @@
 		this.computed_position_acceleration_ends = 0.0;		// actual computed values
 		this.computed_position_deceleration_begins = 0.0;
 		this.computed_rotation_acceleration_ends = 0.0;
+
+		// callback methods
+		this.rAF = this._rAF();
 
 		// prep the images
 		this.load_images();
@@ -112,14 +115,12 @@
 
 	// start (or unpause) a movie
 	Whoosh.prototype.start = function(){
-		if (this.interval_handle == null)
+		if (this.is_paused)
 		{
 			console.log('starting player');
+			this.is_paused = false;
 			this.set_reference_point();
-			var that = this;
-			this.interval_handle = window.setInterval(function(){
-				that.interval();
-			}, this.opts.interval);
+			window.requestAnimationFrame(this.rAF);
 		}
 	};
 
@@ -127,28 +128,50 @@
 	// NOTE: if your intent is to stop and reset to the
 	// beginning, you'll need to call reset() as well
 	Whoosh.prototype.stop = function(){
-		if (this.interval_handle != null)
+		if (!this.is_paused)
 		{
 			console.log('stopping player');
-			window.clearInterval(this.interval_handle);
-			this.interval_handle = null;
+			this.is_paused = true;
 		}
 	};
 
 	// a simplified pause handler that stops/starts
 	// based on the current state
 	Whoosh.prototype.pause = function(){
-		if (this.interval_handle != null)
+		if (!this.is_paused)
 			this.stop();
 		else
 			this.start();
 	};
 
+	// a function suitable for use with requestAnimationFrame
+	//
+	// rAF asks the browser to invoke a function whenever
+	// it's ready for an animation frame to be processed;
+	// the browser automatically reduces the refresh rate
+	// when the tab isn't in focus (and we can detect that
+	// in other ways and pause the animation) but it also
+	// automatically adjusts the frame rate to the browser's
+	// capabilities.
+	//
+	// Unfortunately the function that rAF invokes has "this"
+	// set to the window object, which isn't terribly helpful.
+	// We construct a unique function that invokes interval().
+	//
+	Whoosh.prototype._rAF = function(){
+		var that = this;
+		return function(elapsed_time){
+			that.interval(elapsed_time);
+		};
+	};
+
 	// what to do at each refresh interval
-	Whoosh.prototype.interval = function(){
+	Whoosh.prototype.interval = function(elapsed_time){
 		// paused movies do absolutely nothing
-		// (they should actually turn off the interval, but
-		// if it's still running at least they won't move)
+		// (if we were using setInterval we would need to
+		// turn off the interval rather than using a do-nothing
+		// callback, but we're using rAF shim now, so this is
+		// actually how we turn off the animation)
 		if (this.is_paused)
 			return;
 
@@ -158,6 +181,9 @@
 
 		// draw the whole frame
 		this.render();
+
+		// ask for another frame
+		window.requestAnimationFrame(this.rAF);
 	}
 
 	// set up reference point and compute segment boundaries
@@ -460,3 +486,35 @@
 		}
 	});
 })(jQuery, window);
+
+// http://paulirish.com/2011/requestanimationframe-for-smart-animating/
+// http://my.opera.com/emoller/blog/2011/12/20/requestanimationframe-for-smart-er-animating
+
+// requestAnimationFrame polyfill by Erik Möller. fixes from Paul Irish and Tino Zijdel
+
+// MIT license
+
+(function() {
+    var lastTime = 0;
+    var vendors = ['ms', 'moz', 'webkit', 'o'];
+    for(var x = 0; x < vendors.length && !window.requestAnimationFrame; ++x) {
+        window.requestAnimationFrame = window[vendors[x]+'RequestAnimationFrame'];
+        window.cancelAnimationFrame = window[vendors[x]+'CancelAnimationFrame']
+                                   || window[vendors[x]+'CancelRequestAnimationFrame'];
+    }
+
+    if (!window.requestAnimationFrame)
+        window.requestAnimationFrame = function(callback, element) {
+            var currTime = new Date().getTime();
+            var timeToCall = Math.max(0, 16 - (currTime - lastTime));
+            var id = window.setTimeout(function() { callback(currTime + timeToCall); },
+              timeToCall);
+            lastTime = currTime + timeToCall;
+            return id;
+        };
+
+    if (!window.cancelAnimationFrame)
+        window.cancelAnimationFrame = function(id) {
+            clearTimeout(id);
+        };
+}());
