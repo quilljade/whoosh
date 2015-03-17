@@ -144,6 +144,21 @@
 			this.start();
 	};
 
+	// a simple reset handler
+	Whoosh.prototype.reset = function(){
+		// stop all motion
+		this.stop();
+
+		// reset the position
+		this.frame_position = 0.0;				// a float, not an integer
+		this.frame_position_speed = 0.0;
+		this.frame_rotation = 0.0;				// a float, not an integer
+		this.frame_rotation_speed = 0.0;
+
+		// render the initial frame
+		this.render(0);
+	};
+
 	// a function suitable for use with requestAnimationFrame
 	//
 	// rAF asks the browser to invoke a function whenever

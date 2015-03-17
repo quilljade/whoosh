@@ -6,12 +6,19 @@
 	</head>
 	<body>
 		<div id="whooshDiv" style="margin: 50px auto; width: 800px; height: 600px; background: #f0f0f0; border: 1px solid black;"></div>
+		<div style="margin: 0 auto; width: 400px;">
+			<a id="button_reset" href="">Reset</a>
+		</div>
 		<script>
 			$('#whooshDiv').whoosh({
 				"base_name": "zoom{frame_number}.jpg",
 				"digits": 2,
 				"first_frame": 0,
 				"last_frame": 48
+			});
+			$('#button_reset').on('click', function(e){
+				e.preventDefault();
+				$('#whooshDiv').data('whoosh').reset();
 			});
 			//$('#whooshDiv').data('whoosh').start();
 		</script>
