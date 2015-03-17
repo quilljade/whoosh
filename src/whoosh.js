@@ -517,6 +517,10 @@
 		// make sure to restore the context so as to
 		// undo the rotation/translation
 		this.context.restore();
+
+		// check for a render callback
+		if (typeof(this.opts.onrender) == 'function')
+			this.opts.onrender(100.0 * frame_position / (this.images.length-1));
 	};
 
 	// add to jQuery this function...
