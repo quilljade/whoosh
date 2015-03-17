@@ -30,7 +30,8 @@
 
 		// playback state data
 		this.is_zooming_out = false;			// essentially, a forwards-or-backwards flag
-		this.is_paused = true;					// update timer still running, but not animating
+		this.is_paused = true;					// whether to ask for another animation frame
+		this.was_paused = true;					// paused state prior to drag operation
 		this.interval_handle = null;
 
 		// zooming requires some state data; this
@@ -97,7 +98,7 @@
 
 		// go ahead and set the end position of the movie
 		// (stub; later refactor may move this)
-		this.computed_position_end = this.images.length;	// last frame at 100% scale
+		this.computed_position_end = this.images.length-1;	// last frame at 100% scale
 	};
 
 	Whoosh.prototype.loaded_image = function(image){
@@ -105,7 +106,7 @@
 		for (i = 0; i < this.images.length; i++)
 			if (this.images[i][0] == image)
 			{
-				console.log("loaded:", i, this.images[i], this.images[i][0].width, 'x', this.images[i][0].height);
+//				console.log("loaded:", i, this.images[i], this.images[i][0].width, 'x', this.images[i][0].height);
 				this.images[i][1] = true;
 				if (i == 0)
 					this.render(0);				// first frame is loaded, render it
@@ -157,6 +158,49 @@
 
 		// render the initial frame
 		this.render(0);
+	};
+
+	// drag handler methods
+	// NOTE: these are NOT the DOM event handlers; they are
+	// internal methods you would call from event handlers to
+	// do anything not part of the event-management code. See
+	// the example HTML.
+
+	Whoosh.prototype.dragstart = function(){
+		console.log('drag starting');
+		// save the current pause state because we need to
+		// pause while dragging, and we want to restore the
+		// pause state when we're done
+		this.was_paused = this.is_paused;
+		this.is_paused = true;
+	};
+
+	Whoosh.prototype.drag = function(pct){
+		// it's up to the calling code to determine the
+		// percentage position, but once that's done, this
+		// code will render the image at that position
+		//
+		// NOTE: we compute based on the full length of
+		// the movie, NOT based on the current endpoint,
+		// since that might not be the movie's end if the
+		// user asked to reverse the movie somewhere in
+		// the middle
+		//
+		// NOTE: we also don't change the rotation while
+		// seeking; that's too disorienting
+		//
+		var frame_position = (this.images.length-1) * pct * 0.01;
+		this.frame_position = frame_position;
+		this.render();
+	};
+
+	Whoosh.prototype.dragend = function(){
+		console.log('drag ending');
+		// restore the pause state and resume playing
+		// NOTE: start() will update the pause state, we
+		// only need to check whether to start or not
+		if (!this.was_paused)
+			this.start();
 	};
 
 	// a function suitable for use with requestAnimationFrame
@@ -355,10 +399,14 @@
 		// playback.
 
 		// determine base frame position
-		var frame_top = Math.floor((frame_position == undefined) ? this.frame_position : frame_position);
-		var frame_partial = this.frame_position - frame_top;
+		if (frame_position == undefined)
+			frame_position = this.frame_position;
+		var frame_top = Math.floor(frame_position);
+		var frame_partial = frame_position - frame_top;
 		var frame_count = 2;	// number of frames to render (1 @ 100%-200%, 1 @ 50%-100%)
 		var base_scale = Math.pow(2.0, frame_partial);
+
+//		console.log('render position', frame_position, frame_top, frame_partial);
 
 		// determine how many extra frames we must render
 		// so that the canvas corners are covered by bitmaps
