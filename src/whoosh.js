@@ -29,7 +29,7 @@
 		this.images = null;						// no images set up yet
 
 		// playback state data
-		this.is_zooming_out = false;			// essentially, a forwards-or-backwards flag
+		this.zoom_direction = 1.0;				// essentially, a forwards-or-backwards flag; 1.0 or -1.0
 		this.is_paused = true;					// whether to ask for another animation frame
 		this.was_paused = true;					// paused state prior to drag operation
 		this.interval_handle = null;
@@ -269,14 +269,16 @@
 		//     zero)
 		//
 		// Position is thus a quadratic curve in segments
-		// 1 and 2 and linear in segment 2.
+		// 1 and 2 and linear in segment 2. However, we might
+		// be zooming in or out, and this will affect the
+		// direction and the endpoint selection.
 
 		// compute the time offsets for the segment boundaries
 
 		// end of first segment
 		var t = (this.opts.speed - this.reference_position_speed) / this.opts.cushion;
 		this.time_position_acceleration_ends = t;
-		this.computed_position_acceleration_ends = this.reference_position + this.reference_position_speed*t + 0.5*this.opts.cushion*t*t;
+		this.computed_position_acceleration_ends = this.reference_position + this.zoom_direction * (this.reference_position_speed*t + 0.5*this.opts.cushion*t*t);
 
 		// beginning of third segment, relative to the end; we
 		// can't compute the actual time until we know how far
@@ -285,17 +287,20 @@
 		// total distance
 		t = this.opts.speed / this.opts.cushion;
 		this.time_position_deceleration_begins = -t;
-		this.computed_position_deceleration_begins = this.computed_position_end - 0.5*this.opts.cushion*t*t;
+		this.computed_position_deceleration_begins = this.computed_position_end - this.zoom_direction * 0.5*this.opts.cushion*t*t;
 
 		// now that we know where acceleration ends and
 		// deceleration begins, we can compute the actual length
 		// of time for the constant-speed section in the middle
 		//
+		// NOTE: if we are zooming out, this will be negative,
+		// so we multiply by the zoom direction to correct it
+		//
 		// edge case: deceleration has to begin before acceleration
 		// ends, because there's not enough room to reach full
 		// speed; in this case, there's no constant-speed section
 		//**** TODO
-		t = (this.computed_position_deceleration_begins - this.computed_position_acceleration_ends) / this.opts.speed;
+		t = this.zoom_direction * (this.computed_position_deceleration_begins - this.computed_position_acceleration_ends) / this.opts.speed;
 		this.time_position_deceleration_ends = this.time_position_acceleration_ends + t - this.time_position_deceleration_begins;
 		this.time_position_deceleration_begins += this.time_position_deceleration_ends;
 
@@ -314,21 +319,66 @@
 		if (t < this.time_position_acceleration_ends)
 		{
 			// segment 1: speed increases towards target speed
-			this.frame_position = this.reference_position + this.reference_position_speed*t + 0.5*this.opts.cushion*t*t;
+			this.frame_position = this.reference_position + this.zoom_direction * (this.reference_position_speed*t + 0.5*this.opts.cushion*t*t);
 			this.frame_position_speed = this.reference_position_speed + this.opts.cushion*t;
 		}
 		else if (t < this.time_position_deceleration_begins)
 		{
 			// segment 2: speed is constant
 			t -= this.time_position_acceleration_ends;
-			this.frame_position = this.computed_position_acceleration_ends + this.opts.speed*t;
+			this.frame_position = this.computed_position_acceleration_ends + this.zoom_direction * this.opts.speed*t;
 			this.frame_position_speed = this.opts.speed;
 		}
 		else
 		{
 			// segment 3: speed decreases towards zero
 			t -= this.time_position_deceleration_ends;
-			this.frame_position = this.computed_position_end - 0.5*this.opts.cushion*t*t;
+
+			// Here, we have a couple of situations which might
+			// require careful processing. If we are past the
+			// time when we should have reached the end, we need
+			// to reset the animation to play in the opposite
+			// direction. Since our time-since-end should be
+			// negative, we know if it's positive we're past the
+			// end.
+			//
+			// NOTE: it's possible we could overshoot this by a
+			// LOT. We don't check to see just how far back into
+			// the animation we should advance when reversing;
+			// we just set the new beginning to the current end
+			// and call it a day.
+			//
+			// NOTE: we also only reset the position, not the
+			// rotation, because we don't stop or slow down the
+			// rotation when we reach either end.
+			//
+			if (t >= 0.0)
+			{
+				// past the end, but WHICH end?
+				if (this.zoom_direction > 0.0)
+				{
+					// we were zooming in, reset to zoom out
+					this.zoom_direction = -1.0;
+					this.frame_position = this.computed_position_end;
+					this.frame_position_speed = 0.0;
+					this.computed_position_end = 0.0;
+					this.set_reference_point();
+					return;
+				}
+
+				else
+				{
+					// we were zooming out, reset to zoom in
+					this.zoom_direction = 1.0;
+					this.frame_position = this.computed_position_end;
+					this.frame_position_speed = 0.0;
+					this.computed_position_end = this.images.length-1;
+					this.set_reference_point();
+					return;
+				}
+			}
+
+			this.frame_position = this.computed_position_end - this.zoom_direction * 0.5*this.opts.cushion*t*t;
 			this.frame_position_speed = -this.opts.cushion*t;
 		}
 	};
