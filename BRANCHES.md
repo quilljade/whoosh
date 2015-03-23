@@ -2,7 +2,9 @@
 
 ## Releases
 
-None yet.
+### release/0.1
+
+Essentially a proof-of-concept: zoom player works, loads frames, computes frames to render based on player size, eases properly. No real control UI, few config options.
 
 ## Feature Branches
 
