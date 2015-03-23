@@ -1,0 +1,57 @@
+<html>
+	<head>
+		<title> whoosh example: basic </title>
+		<script src="http://code.jquery.com/jquery-2.1.1.min.js"></script>
+		<script src="../../src/whoosh.js"></script>
+	</head>
+	<body>
+		<div id="whooshDiv" style="margin: 50px auto; width: 800px; height: 600px; background: #f0f0f0; border: 1px solid black;"></div>
+		<div id="slider_seek" style="position: relative; left: 0; top: 0; margin: 0 auto; width: 400px; height: 20px; border: 1px solid black; background: #6666cc;"><div id="slider_thumb" style="position: absolute; left: 0px; top: 0px; margin: 0; width: 1px; height: 20px; border: none; background: black;"></div></div>
+		<div style="margin: 10px auto; width: 400px;">
+			<a id="button_reset" href="">Reset</a>
+		</div>
+		<script>
+			$('#whooshDiv').whoosh({
+				"base_name": "zoom{frame_number}.jpg",
+				"digits": 2,
+				"first_frame": 0,
+				"last_frame": 48,
+				"onrender": function(pct){
+					var thumb = $('#slider_thumb');
+					var offsetX = pct * 0.01 * ($('#slider_seek').width()-1);
+					thumb.css({ left: offsetX+'px', top: 0 });
+				}
+			});
+			$('#button_reset').on('click', function(e){
+				e.preventDefault();
+				$('#whooshDiv').data('whoosh').reset();
+			});
+			var is_seeking = false;
+			$('#slider_seek').on({
+				'mousedown': function(e){
+					is_seeking = true;
+					$('#whooshDiv').data('whoosh').dragstart();
+					var pct = e.offsetX / ($('#slider_seek').width()-1) * 100.0;
+					pct = Math.min(Math.max(pct, 0.0), 100.0);
+					$('#whooshDiv').data('whoosh').drag(pct);
+				},
+				'mousemove': function(e){
+					if (is_seeking)
+					{
+						var pct = e.offsetX / ($('#slider_seek').width()-1) * 100.0;
+						pct = Math.min(Math.max(pct, 0.0), 100.0);
+						$('#whooshDiv').data('whoosh').drag(pct);
+					}
+
+				},
+				// this is a kluge since the mouseup event might
+				// go to a different object
+				'mouseup': function(e){
+					is_seeking = false;
+					$('#whooshDiv').data('whoosh').dragend();
+				}
+			});
+			//$('#whooshDiv').data('whoosh').start();
+		</script>
+	</body>
+</html>
